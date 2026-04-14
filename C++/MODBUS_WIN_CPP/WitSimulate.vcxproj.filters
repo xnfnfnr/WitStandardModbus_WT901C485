@@ -32,5 +32,25 @@
     <ClInclude Include="REG.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="resource1.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="resource2.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="resource4.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="resource5.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="resource6.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\..\..\..\Users\thd87\Downloads\CAPH\wit_logo.ico">
+      <Filter>资源文件</Filter>
+    </Image>
   </ItemGroup>
 </Project>

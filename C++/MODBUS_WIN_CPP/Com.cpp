@@ -26,6 +26,9 @@ signed char SendUARTMessageLength(const char chrSendBuffer[],const unsigned shor
 	DWORD dwRes;
 	DCB dcb;
 
+	if (hComDev == NULL || hComDev == INVALID_HANDLE_VALUE)
+		return -1;
+
 	GetCommState(hComDev ,&dcb);
 	dcb.fDtrControl = 0;//DTR = 1;sending
 	SetCommState(hComDev ,&dcb);
@@ -157,10 +160,19 @@ void CloseCOMDevice()
 {
 	ulUARTBufferEnd = 0;
 	ulUARTBufferStart = 0;
+
+	// Overlapped I/O를 먼저 취소해서 ReceiveCOMData 스레드가 블로킹에서 풀리도록 함
+	if (hComDev != NULL && hComDev != INVALID_HANDLE_VALUE)
+		CancelIo(hComDev);
+
 	TerminateThread(hCOMThread,0);
 	WaitForSingleObject(hCOMThread,10000);
-	PurgeComm(hComDev,PURGE_TXABORT|PURGE_RXABORT|PURGE_TXCLEAR|PURGE_RXCLEAR);
+
+	if (hComDev != NULL && hComDev != INVALID_HANDLE_VALUE)
+		PurgeComm(hComDev,PURGE_TXABORT|PURGE_RXABORT|PURGE_TXCLEAR|PURGE_RXCLEAR);
+
 	CloseHandle(stcReadStatus.hEvent);
 	CloseHandle(stcWriteStatus.hEvent);
 	CloseHandle(hComDev);
+	hComDev = NULL;
 }
