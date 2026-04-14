@@ -32,11 +32,11 @@ static HANDLE g_hShutdownEvent = INVALID_HANDLE_VALUE;
 // ===== sensor connection =====
 static volatile ULONGLONG g_lastUpdateTick = 0;
 
-// ===== Config (ini ??????? ?��?) =====
-static int g_ConfigComPort = -1;			// ???? ??????? ?��?? COM ??? ???
-static DWORD g_DisconnectTimeoutMs = 5000;	// ?? ?��? ?? ??????? ?????? ???? ???
-static DWORD g_RescanIntervalMs = 5000;		// ?????? ????? ?? ??? ??? ???
-static DWORD g_ReadIntervalMs = 100;		// ?��? ???
+// ===== Config (ini 파일에서 읽기) =====
+static int g_ConfigComPort = -1;			// 설정 파일에서 읽어온 COM 포트 번호
+static DWORD g_DisconnectTimeoutMs = 5000;	// 이 시간 동안 데이터가 없으면 연결 끊김으로 판단
+static DWORD g_RescanIntervalMs = 5000;		// 연결 끊김 감지 후 재스캔 간격
+static DWORD g_ReadIntervalMs = 100;		// 읽기 간격
 
 void SendToPipe(float pitch, float roll);
 void ComRxCallBack(char* p_data, UINT32 uiSize);
@@ -76,14 +76,14 @@ void main(void)
 	// this by name and set it to trigger graceful exit.
 	g_hShutdownEvent = CreateEventA(NULL, TRUE, FALSE, "TiltSensor_Shutdown");
 
-	// ???? ???? ?��?
+	// 설정 파일 로드
 	LoadConfig();
 
-	// ???? ???? ???
+	// 초기 센서 연결
 	if (!ScanAndReconnectSensor())
 	{
 		printf("Sensor not found at startup. Entering disconnected mode.\n");
-		// ???? return???? ???, ??? ???????? ????????? ???????? ??
+		// 여기서 return하지 않고, 루프 안에서 주기적으로 재연결 시도
 	}
 
 	DWORD lastRescanTick = 0;
@@ -111,44 +111,44 @@ void main(void)
 		ULONGLONG now = GetTickCount64();  // GetTickCount()?? GetTickCount64() ????
 		ULONGLONG lastUpdate = InterlockedCompareExchange64((volatile LONGLONG*)&g_lastUpdateTick, 0, 0);
 
-		// 1) ???? ?????? ?????? ??? ?��? ???
+		// 1) 연결된 포트가 있으면 데이터 읽기 시도
 		if (iComPort >= 0)
 		{
 			s_cDataUpdate = 0;
 			WitReadReg(Roll, 2);
 
-			// ??????? sReg???? ??? (????: ????????? ???? ???? ????)
+			// 실제로는 sReg에서 읽음 (참고: 콜백에서 이미 값이 업데이트됨)
 			roll = (float)sReg[Roll] / 32768.0f * 180.0f;
 			pitch = (float)sReg[Pitch] / 32768.0f * 180.0f;
 		}
 
-		// 2) ???? ??? ???(??? DISCONNECT_TIMEOUT_MS ?? ??????? ????)
+		// 2) 연결 상태 확인 (마지막 DISCONNECT_TIMEOUT_MS 내 업데이트 여부)
 		int needRescan = 1;
 		if (lastUpdate != 0 && (now - lastUpdate) <= g_DisconnectTimeoutMs)
 			needRescan = 0;
 
 		if (!needRescan)
 		{
-			// "????? ???" ?? ???? ???
+			// "연결됨 상태" 일 때 데이터 전송
 			SendToPipe(roll, pitch);
 			printf("\rRoll: %7.3f Pitch: %7.3f    ", roll, pitch);
 		}
 		else
 		{
-			// "???????? ???" ?? ??????: DISCONNECT_TIMEOUT_MS ???? ??? ???
+			// "연결 끊김 상태" 일 때 재스캔: DISCONNECT_TIMEOUT_MS마다 한 번씩
 			if ((now - lastRescanTick) >= g_RescanIntervalMs)
 			{
 				lastRescanTick = now;
 
 				if (!ScanAndReconnectSensor())
 				{
-					// ??? ????: ???? ???��?/???? ???
+					// 재연결 실패: 포트 닫기/초기화
 					iComPort = -1;
-					CloseCOMDevice(); // ??? ???? ???��? ????
+					CloseCOMDevice(); // 혹시 열린 핸들이 있으면 닫기
 				}
 			}
 
-			// ???? ???? ???? ???
+			// 연결 끊김 신호 파이프 전송
 			SendToPipe(-999.0f, -999.0f);
 			printf("\rSensor Disconnected (scanning...)           ");
 		}
@@ -161,10 +161,10 @@ void main(void)
 		CloseHandle(hPipe);
 }
 
-// pipe?? ????
+// pipe에 데이터 전송
 void SendToPipe(float pitch, float roll)
 {
-	// ?????? ????
+	// 파이프에 연결
 	while (hPipe == INVALID_HANDLE_VALUE)
 	{
 		hPipe = CreateFile(
@@ -183,7 +183,7 @@ void SendToPipe(float pitch, float roll)
 		//}
 	}
 
-	// ?????? ????
+	// 데이터 전송
 	char buffer[64];
 	sprintf_s(buffer, "%.2f,%.2f\n", pitch, roll);
 	DWORD bytesWritten;
@@ -217,7 +217,7 @@ static void SensorUartSend(uint8_t* p_data, uint32_t uiSize)
 static void CopeSensorData(uint32_t uiReg, uint32_t uiRegNum)
 {
 	s_cDataUpdate = 1;
-	InterlockedExchange64((volatile LONGLONG*)&g_lastUpdateTick, (LONGLONG)GetTickCount64());	// ?????? ???? ?��? ????
+	InterlockedExchange64((volatile LONGLONG*)&g_lastUpdateTick, (LONGLONG)GetTickCount64());	// 마지막 업데이트 시각 갱신
 }
 
 static int AutoScanSensor(void)
@@ -237,7 +237,7 @@ static int AutoScanSensor(void)
 			if (s_cDataUpdate != 0)
 			{
 				printf("%d baud find sensor\r\n\r\n", c_uiBaud[i]);
-				return 1; // ????
+				return 1; // 성공
 			}
 			iRetry--;
 		} while (iRetry);
@@ -245,7 +245,7 @@ static int AutoScanSensor(void)
 	printf("can not find sensor\r\n");
 	printf("please check your connection\r\n");
 
-	return 0; // ????
+	return 0; // 실패
 }
 
 static int LoadConfig(void)
@@ -253,17 +253,17 @@ static int LoadConfig(void)
 	char exePath[MAX_PATH];
 	char configPath[MAX_PATH];
 
-	// ???? ?????? ??? ???? ??? ????????
+	// 현재 실행 파일의 경로를 가져옴
 	GetModuleFileNameA(NULL, exePath, MAX_PATH);
 	char* lastSlash = strrchr(exePath, '\\');
 
 	if (lastSlash)
 		*lastSlash = '\0';
 
-	// sensorConfig.ini ??? ????
+	// sensorConfig.ini 경로 생성
 	sprintf_s(configPath, MAX_PATH, "%s\\sensorConfig.ini", exePath);
 
-	// ?????? ?��? (???? ????)
+	// 설정값 읽기 (기본값 포함)
 	g_ConfigComPort = GetPrivateProfileIntA("Sensor", "ComPort", -1, configPath);
 	g_DisconnectTimeoutMs = GetPrivateProfileIntA("Sensor", "DISCONNECT_TIMEOUT_MS", 5000, configPath);
 	g_RescanIntervalMs = GetPrivateProfileIntA("Sensor", "RESCAN_INTERVAL_MS", 5000, configPath);
@@ -279,7 +279,7 @@ static int LoadConfig(void)
 		return 0;
 	}
 
-	// ?????? ???
+	// 설정값 출력
 	printf("=== Configuration Loaded ===\n");
 	printf("Config file: %s\n", configPath);
 	printf("COM Port: COM%d\n", g_ConfigComPort);
@@ -329,7 +329,7 @@ static int LoadConfig(void)
 
 static int TryFindSensorOnPort(int comPort)
 {
-	// ??? ????
+	// 포트 열기
 	int openResult = (int)OpenCOMDevice(comPort, iBaud);
 	if (openResult != 0)
 		return 0;
@@ -339,7 +339,7 @@ static int TryFindSensorOnPort(int comPort)
 	WitRegisterCallBack(CopeSensorData);
 	WitDelayMsRegister(DelayMs);
 
-	// ???
+	// 센서 탐색
 	int ok = AutoScanSensor();
 	CloseCOMDevice();
 
@@ -348,30 +348,30 @@ static int TryFindSensorOnPort(int comPort)
 
 static int ConnectSensorOnPort(int comPort)
 {
-	// ???? ?????? ???? ??��? ????(??? ???? ????)
+	// 이전 연결이 있을 경우 먼저 닫기 (중복 열기 방지)
 	CloseCOMDevice();
 
-	// ??? ????
+	// 포트 열기
 	int openResult = (int)OpenCOMDevice(comPort, iBaud);
-	if (openResult != 0) // ????
+	if (openResult != 0) // 실패
 		return 0;
 
-	// Wit ????
+	// Wit SDK 초기화
 	WitInit(WIT_PROTOCOL_MODBUS, 0x50);
 	WitSerialWriteRegister(SensorUartSend);
 	WitRegisterCallBack(CopeSensorData);
 	WitDelayMsRegister(DelayMs);
 
-	// baud ?????? (???? ???? ???)
-	if (AutoScanSensor() == 0) // ????
+	// baud 자동 탐색 (연결 가능한 속도 확인)
+	if (AutoScanSensor() == 0) // 실패
 	{
 		CloseCOMDevice();
 		return 0;
 	}
 
-	// ??? ?? ???? unlock/baud/save ?????? ????
+	// 연결 후 센서 unlock/baud/save 설정값 저장
 	WitWriteReg(KEY, KEY_UNLOCK);       DelayMs(20);
-	WitWriteReg(BAUD, WIT_BAUD_230400); DelayMs(20); //WIT_BAUD_230400
+	WitWriteReg(BAUD, WIT_BAUD_230400); DelayMs(20);
 	WitWriteReg(SAVE, SAVE_PARAM);      DelayMs(20);
 
 	iComPort = comPort;
@@ -409,5 +409,5 @@ static int ScanAndReconnectSensor(void)
 		}
 	}
 
-	return 0; // ????????? ???? ?? ???
+	return 0; // 설정된 포트에서도 센서를 찾지 못함
 }
